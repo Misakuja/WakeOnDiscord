@@ -37,13 +37,12 @@ void connectToWiFi() {
 
 String createHttpsRequest(const char* method, const String& path, const String& body = "") {
   WiFiClientSecure client;
-  client.setInsecure(); //ignore certificate
+  client.setInsecure();
   if (!client.connect("discord.com", 443)) {
     ledState = LED_ERROR_REQUEST;
-    return ""; //TCP handshake
+    return "";
   }
 
-  //send req
   String req = String(method) + " " + path + " HTTP/1.1\r\n"
              + "Host: discord.com\r\n"
              + "Authorization: Bot " + BOT_TOKEN + "\r\n"
@@ -54,7 +53,6 @@ String createHttpsRequest(const char* method, const String& path, const String& 
   req += "\r\n" + body;
   client.print(req);
 
-  //wait 5s
   unsigned long waitTime = millis();
   while (!client.available() && millis() - waitTime < 5000); // waits 5s for discord to respond
   if (!client.available()) {
@@ -62,12 +60,10 @@ String createHttpsRequest(const char* method, const String& path, const String& 
     return "";
   }
 
-  //skip headers
   while (client.available()) {
     if (client.readStringUntil('\n') == "\r") break;
   }
 
-  //reassemble body
   String response = "";
 
   while (client.available()) {
@@ -126,38 +122,38 @@ void pollMessages() {
   }
 }
 
-[[noreturn]] void ledTask(void* param) {
+[[noreturn]] void ledTask(void* parameter) {
   bool blinkOn = false;
 
   for (;;) {
     switch (ledState) {
       case LED_CONNECTING:
-        strip.setPixelColor(0, Adafruit_NeoPixel::Color(0, 0, 255)); // blue
+        strip.setPixelColor(0, Adafruit_NeoPixel::Color(0, 0, 255));
         strip.show();
         vTaskDelay(pdMS_TO_TICKS(100));
         break;
 
       case LED_IDLE:
-        strip.setPixelColor(0, Adafruit_NeoPixel::Color(0, 255, 0)); // green
+        strip.setPixelColor(0, Adafruit_NeoPixel::Color(0, 255, 0));
         strip.show();
         vTaskDelay(pdMS_TO_TICKS(100));
         break;
 
       case LED_WOL_SENT:
-        strip.setPixelColor(0, Adafruit_NeoPixel::Color(255, 255, 255)); // white blink
+        strip.setPixelColor(0, Adafruit_NeoPixel::Color(255, 255, 255));
         strip.show();
         vTaskDelay(pdMS_TO_TICKS(500));
         ledState = LED_IDLE;
         break;
 
       case LED_ERROR_WIFI:
-        strip.setPixelColor(0, Adafruit_NeoPixel::Color(255, 0, 0)); // red
+        strip.setPixelColor(0, Adafruit_NeoPixel::Color(255, 0, 0));
         strip.show();
         vTaskDelay(pdMS_TO_TICKS(100));
         break;
 
       case LED_ERROR_REQUEST:
-        blinkOn = !blinkOn; // red blink
+        blinkOn = !blinkOn;
         strip.setPixelColor(0, blinkOn ? Adafruit_NeoPixel::Color(255, 0, 0) : Adafruit_NeoPixel::Color(0, 0, 0));
         strip.show();
         vTaskDelay(pdMS_TO_TICKS(150));
