@@ -5,11 +5,13 @@
 #include <WakeOnLan.h>
 #include <ArduinoJson.h>
 #include <Adafruit_NeoPixel.h>
+#include <esp_system.h>
 
 #include "env.h"
 
 constexpr int LED_PIN = 38;
 constexpr int POLL_INTERVAL_MS = 3000;
+constexpr int ERROR_RESTART_MS = 30000;
 
 enum LedState { LED_CONNECTING, LED_IDLE, LED_WOL_SENT, LED_ERROR_WIFI, LED_ERROR_REQUEST };
 volatile LedState ledState = LED_CONNECTING;
@@ -81,6 +83,7 @@ String createHttpsRequest(const char* method, const String& path, const String& 
   }
 
   if (ledState == LED_ERROR_REQUEST) ledState = LED_IDLE;
+  client.stop();
   return response;
 }
 
@@ -92,37 +95,50 @@ void seedLastMessageId() {
   Serial.println("Seeded: " + lastMessageId);
 }
 
-void pollMessages() {
-  String response = createHttpsRequest("GET", "/api/v10/channels/" + String(CHANNEL_ID) + "/messages?limit=5&after=" + lastMessageId);
-  if (response.isEmpty()) return;
+[[noreturn]] void pollTask(void*) {
+  while (ledState == LED_CONNECTING)
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-  DynamicJsonDocument doc(4096);
-  if (deserializeJson(doc, response)) return;
+  vTaskDelay(pdMS_TO_TICKS(5000));
 
-  JsonArray messages = doc.as<JsonArray>();
-  bool triggered = false;
+  for (;;) {
+    if (!WiFi.isConnected()) {
+      ledState = LED_ERROR_WIFI;
+    } else {
+      String response = createHttpsRequest("GET", "/api/v10/channels/" + String(CHANNEL_ID) + "/messages?limit=5&after=" + lastMessageId);
 
-  for (size_t i = 0; i < messages.size(); i++) {
-    String msgId   = messages[i]["id"].as<String>();
-    String author  = messages[i]["author"]["id"].as<String>();
-    String content = messages[i]["content"].as<String>();
+      if (!response.isEmpty()) {
+        DynamicJsonDocument doc(4096);
+        if (!deserializeJson(doc, response)) {
+          JsonArray messages = doc.as<JsonArray>();
+          bool triggered = false;
 
-    if (msgId > lastMessageId) lastMessageId = msgId;
-    if (triggered || author != String(USER_ID)) continue;
+          for (size_t i = 0; i < messages.size(); i++) {
+            String msgId   = messages[i]["id"].as<String>();
+            String author  = messages[i]["author"]["id"].as<String>();
+            String content = messages[i]["content"].as<String>();
 
-    content.toLowerCase(); content.trim();
-    if (content == "!wol") {
-      triggered = true;
-      WOL.sendMagicPacket(TARGET_PC_MAC);
-      ledState = LED_WOL_SENT;
-      createHttpsRequest("POST", "/api/v10/channels/" + String(CHANNEL_ID) + "/messages",
-        R"json({"content":"Wake-up packet sent!"})json");
-      createHttpsRequest("PUT", "/api/v10/channels/" + String(CHANNEL_ID) + "/messages/" + msgId + "/reactions/%E2%9C%85/@me");
+            if (msgId > lastMessageId) lastMessageId = msgId;
+            if (triggered || author != String(USER_ID)) continue;
+
+            content.toLowerCase(); content.trim();
+            if (content == "!wol") {
+              triggered = true;
+              WOL.sendMagicPacket(TARGET_PC_MAC);
+              ledState = LED_WOL_SENT;
+              createHttpsRequest("POST", "/api/v10/channels/" + String(CHANNEL_ID) + "/messages",
+                R"json({"content":"Wake-up packet sent!"})json");
+              createHttpsRequest("PUT", "/api/v10/channels/" + String(CHANNEL_ID) + "/messages/" + msgId + "/reactions/%E2%9C%85/@me");
+            }
+          }
+        }
+      }
     }
+    vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_MS));
   }
 }
 
-[[noreturn]] void ledTask(void* parameter) {
+[[noreturn]] void ledTask(void*) {
   bool blinkOn = false;
 
   for (;;) {
@@ -162,13 +178,33 @@ void pollMessages() {
   }
 }
 
+[[noreturn]] void watchdogTask(void*) {
+  unsigned long errorStartMs = 0;
+
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    bool inError = (ledState == LED_ERROR_WIFI || ledState == LED_ERROR_REQUEST || ledState == LED_CONNECTING);
+
+    if (!inError) {
+      errorStartMs = 0;
+    } else if (errorStartMs == 0)
+      errorStartMs = millis();
+
+    if (errorStartMs != 0 && millis() - errorStartMs >= ERROR_RESTART_MS)
+      esp_restart();
+  }
+}
+
 void setup() {
   Serial.begin(115200);
 
   strip.begin();
+  strip.setBrightness(1);
   strip.show();
 
+  xTaskCreate(pollTask, "poll", 8192, nullptr, 1, nullptr);
   xTaskCreate(ledTask, "led", 2048, nullptr, 0, nullptr);
+  xTaskCreate(watchdogTask, "watchdog", 2048, nullptr, 1, nullptr);
 
   connectToWiFi();
 
@@ -177,14 +213,4 @@ void setup() {
   seedLastMessageId();
 }
 
-void loop() {
-  if (!WiFi.isConnected()) {
-    ledState = LED_ERROR_WIFI;
-    Serial.println("Lost connection to WiFi");
-    connectToWiFi();
-    return;
-  }
-  pollMessages();
-
-  delay(POLL_INTERVAL_MS);
-}
+void loop() {}
