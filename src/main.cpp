@@ -10,7 +10,7 @@
 #include "env.h"
 
 constexpr int LED_PIN = 38;
-constexpr int POLL_INTERVAL_MS = 3000;
+constexpr int POLL_INTERVAL_MS = 1500;
 constexpr int ERROR_RESTART_MS = 30000;
 
 enum LedState { LED_CONNECTING, LED_IDLE, LED_WOL_SENT, LED_ERROR_WIFI, LED_ERROR_REQUEST };
@@ -99,7 +99,7 @@ void seedLastMessageId() {
   while (ledState == LED_CONNECTING)
     vTaskDelay(pdMS_TO_TICKS(100));
 
-  vTaskDelay(pdMS_TO_TICKS(5000));
+  seedLastMessageId();
 
   for (;;) {
     if (!WiFi.isConnected()) {
@@ -210,7 +210,6 @@ void setup() {
 
   WOL.setRepeat(3, 100);
   WOL.calculateBroadcastAddress(WiFi.localIP(), WiFi.subnetMask());
-  seedLastMessageId();
 }
 
 void loop() {}
