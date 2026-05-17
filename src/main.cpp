@@ -70,7 +70,10 @@ String createHttpsRequest(const char* method, const String& path, const String& 
   client.print(req);
 
   unsigned long waitTime = millis();
-  while (!client.available() && millis() - waitTime < 5000); // waits 5s for discord to respond
+  while (!client.available() && millis() - waitTime < 5000) { // waits 5s for discord to respond
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+
   if (!client.available()) {
     setLedState(LED_ERROR_REQUEST);
     client.stop();
@@ -92,8 +95,15 @@ String createHttpsRequest(const char* method, const String& path, const String& 
     unsigned long size = strtoul(sizeLine.c_str(), nullptr, 16);
     if (!size) break;
 
-    while (size-- && (client.available() || millis() - waitTime < 5000))
-      if (client.available()) response += static_cast<char>(client.read());
+    unsigned long remaining = size;
+    while (remaining > 0 && (client.available() || millis() - waitTime < 5000)) {
+      if (client.available()) {
+        response += static_cast<char>(client.read());
+        remaining--;
+      } else {
+        vTaskDelay(pdMS_TO_TICKS(10));
+      }
+    }
     client.readStringUntil('\n');
   }
 
@@ -104,7 +114,7 @@ String createHttpsRequest(const char* method, const String& path, const String& 
 
 bool seedLastMessageId() {
   String response = createHttpsRequest("GET", "/api/v10/channels/" + String(CHANNEL_ID) + "/messages?limit=1");
-  DynamicJsonDocument doc(4096);
+  DynamicJsonDocument doc(8192);
 
   if (!response.isEmpty() && !deserializeJson(doc, response) && doc.as<JsonArray>().size() > 0) {
     lastMessageId = doc[0]["id"].as<String>();
@@ -129,10 +139,10 @@ bool seedLastMessageId() {
     if (!WiFi.isConnected()) {
       setLedState(LED_ERROR_WIFI);
     } else {
-      String response = createHttpsRequest("GET", "/api/v10/channels/" + String(CHANNEL_ID) + "/messages?limit=5&after=" + lastMessageId);
+      String response = createHttpsRequest("GET", "/api/v10/channels/" + String(CHANNEL_ID) + "/messages?limit=1");
 
       if (!response.isEmpty()) {
-        DynamicJsonDocument doc(4096);
+        DynamicJsonDocument doc(8192);
         if (!deserializeJson(doc, response)) {
           JsonArray messages = doc.as<JsonArray>();
           bool triggered = false;
@@ -221,12 +231,24 @@ bool seedLastMessageId() {
 
 void setup() {
   Serial.begin(115200);
+  while (!Serial) {
+    delay(10);
+  }
 
   strip.begin();
   strip.setBrightness(1);
   strip.show();
 
-  xTaskCreate(pollTask, "poll", 8192, nullptr, 1, nullptr);
+  for (int i = 0; i < 3; i++) {
+    strip.setPixelColor(0, Adafruit_NeoPixel::Color(0, 255, 0));
+    strip.show();
+    delay(150);
+    strip.clear();
+    strip.show();
+    delay(150);
+  }
+
+  xTaskCreate(pollTask, "poll", 16384, nullptr, 1, nullptr);
   xTaskCreate(ledTask, "led", 2048, nullptr, 0, nullptr);
   xTaskCreate(watchdogTask, "watchdog", 2048, nullptr, 1, nullptr);
 
