@@ -248,8 +248,8 @@ void setup() {
     delay(150);
   }
 
-  xTaskCreate(pollTask, "poll", 16384, nullptr, 1, nullptr);
-  xTaskCreate(ledTask, "led", 2048, nullptr, 0, nullptr);
+  xTaskCreate(pollTask, "poll", 16384, nullptr, 2, nullptr);
+  xTaskCreate(ledTask, "led", 2048, nullptr, 1, nullptr);
   xTaskCreate(watchdogTask, "watchdog", 2048, nullptr, 1, nullptr);
 
   connectToWiFi();
