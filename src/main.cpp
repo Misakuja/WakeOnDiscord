@@ -231,9 +231,6 @@ bool seedLastMessageId() {
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial) {
-    delay(10);
-  }
 
   strip.begin();
   strip.setBrightness(1);
